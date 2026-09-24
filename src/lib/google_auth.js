@@ -68,21 +68,17 @@ function checkTokenHealth() {
     }
 
     // refresh_token_created_at ベースのチェック（フォールバック）
+    // 注: これは「テストモードでの7日失効」を推定するためのヒューリスティックにすぎない。
+    // 本番モードでは refresh_token は経過日数では失効しないため、日数だけで失効と
+    // 断定して処理を停止させない（実際の生存判定は refreshAccessToken() の成否に委ねる）。
     if (tokenJson.refresh_token_created_at) {
       const age = Date.now() - tokenJson.refresh_token_created_at;
       const daysOld = age / 86400000;
-      if (age > REFRESH_TOKEN_MAX_AGE_MS) {
-        return {
-          healthy: false,
-          daysLeft: 0,
-          message: `refresh_tokenが${Math.floor(daysOld)}日経過。失効の可能性が高い`,
-        };
-      }
       if (age > REFRESH_TOKEN_WARN_AGE_MS) {
         return {
           healthy: true,
-          daysLeft: Math.max(0, 7 - Math.floor(daysOld)),
-          message: `refresh_tokenが${Math.floor(daysOld)}日経過。まもなく失効する可能性あり`,
+          daysLeft: null,
+          message: `refresh_tokenが${Math.floor(daysOld)}日経過（本番モードなら失効しません）。念のため動作を確認してください`,
         };
       }
     }
@@ -130,11 +126,9 @@ async function getAuthClient() {
       const merged = {
         ...tokenJson,
         ...credentials,
-        refresh_token_created_at: tokenJson.refresh_token_created_at,
-        // refresh_token が新たに返された場合は created_at も更新
-        ...(credentials.refresh_token && credentials.refresh_token !== tokenJson.refresh_token
-          ? { refresh_token_created_at: Date.now() }
-          : {}),
+        // リフレッシュ成功はトークンが生存している証拠なので、鮮度タイムスタンプを
+        // 常に更新する。これにより経過日数ベースの誤検知（本番モードでのfalse positive）を防ぐ。
+        refresh_token_created_at: Date.now(),
       };
       saveTokenJson(merged);
       logger.info('google_auth', 'アクセストークンのリフレッシュ完了');
